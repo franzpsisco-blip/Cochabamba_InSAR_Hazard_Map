@@ -171,10 +171,6 @@
       backdrop-filter: blur(10px);
       -webkit-backdrop-filter: blur(10px);
     }
-    .popup-title{font-weight:700;margin:0 0 6px}
-    .popup-grid{display:grid;grid-template-columns: 1fr 1fr; gap:8px 10px; font-size:12px;}
-    .popup-grid div{padding:6px 8px; border:1px solid rgba(255,255,255,.10); border-radius:12px; background: rgba(0,0,0,.16);}
-    .popup-grid b{display:block;color:#d7e6ff;font-size:11px;margin-bottom:2px}
 
     .statusline{
       margin-top:10px;
@@ -184,13 +180,13 @@
       border-radius: 14px;
       border:1px solid rgba(255,255,255,.10);
       background: rgba(0,0,0,.16);
+      flex-wrap:wrap;
     }
     .statusline code{color:#d7e6ff}
-
     .credits{
       margin-top:12px;
-      padding:12px 12px;
-      border-radius: 14px;
+      padding:12px;
+      border-radius:14px;
       border:1px solid rgba(255,255,255,.10);
       background: rgba(0,0,0,.12);
       font-size:11px;
@@ -226,10 +222,9 @@
       </div>
 
       <div class="card">
-        <h2>Velocity raster (tiles)</h2>
+        <h2>Velocity (mm/year)</h2>
         <p class="muted" style="margin:0 0 10px;">
-          Raster is rendered as <b>XYZ PNG tiles</b> (GitHub Pages friendly). NA/NaN pixels are <b>transparent</b>.
-          Stretch is fixed to <b>-23.3 → 0 → 23.3 mm/year</b> (zero-centered).
+          Raster is served as <b>XYZ PNG tiles</b> (max zoom <b>12</b>). NA/NaN is transparent.
         </p>
 
         <div class="controls">
@@ -250,7 +245,7 @@
           <div class="barwrap">
             <div class="barhead">
               <b>Velocity (mm/year)</b>
-              <span id="stretchLabel">Stretch: -23.3 … 0 … 23.3</span>
+              <span id="rangeLabel">-23.3 … 0 … 23.3</span>
             </div>
             <canvas id="colorbar" width="600" height="40" aria-label="Colorbar"></canvas>
             <div class="ticks">
@@ -277,7 +272,7 @@
 
           <div class="two-col">
             <button id="zoomToData">Zoom to hazards</button>
-            <button id="zoomToRaster">Zoom to raster</button>
+            <button id="zoomToRaster">Zoom to raster area</button>
           </div>
         </div>
       </div>
@@ -285,18 +280,12 @@
       <div class="statusline" id="status">
         <span>Data: <code>data/GeoHazard.geojson</code> + <code>tiles_velocity/{z}/{x}/{y}.png</code></span>
         <span id="loadState">Initializing…</span>
-      </div>
-
-      <div class="card">
-        <h2>Basemaps</h2>
-        <p class="muted" style="margin:0;">
-          Use the layer button on the map to switch between basemaps.
-        </p>
+        <span class="small" id="debugTile"></span>
       </div>
 
       <div class="credits">
-        Developed by <b>Franz Antezana</b><br/>
-        mail: <span>antezana@buaa.edu.cn</span>; <span>f.p.antezana@outlook.com</span>
+        Developed by <b>Franz Pablo Antezana Lopez</b><br/>
+        mail: antezana@buaa.edu.cn; f.p.antezana@outlook.com
       </div>
     </aside>
 
@@ -308,15 +297,11 @@
           crossorigin=""></script>
 
   <script>
-    // ----------------------------
-    // CONFIG (from your raster metadata)
-    // ----------------------------
+    // ---------- CONFIG ----------
     const VMIN = -23.3;
     const VMAX =  23.3;
 
-    // from your terra extent:
-    // xmin -66.5360339909721, xmax -65.5745000815156
-    // ymin -17.8698391625722, ymax -17.2311357408059
+    // Use raster bbox ONLY for "zoom to raster area"
     const RASTER_BOUNDS = L.latLngBounds(
       L.latLng(-17.8698391625722, -66.5360339909721),
       L.latLng(-17.2311357408059, -65.5745000815156)
@@ -330,9 +315,7 @@
 
     const setState = (msg) => document.getElementById("loadState").textContent = msg;
 
-    // ----------------------------
-    // MAP + BASEMAPS
-    // ----------------------------
+    // ---------- MAP ----------
     const map = L.map("map", { zoomControl: true });
 
     const basemaps = {
@@ -351,12 +334,9 @@
     basemaps["Carto Positron"].addTo(map);
     L.control.layers(basemaps, null, { collapsed: true }).addTo(map);
 
-    // initial view
     map.setView([-17.39, -66.16], 11);
 
-    // ----------------------------
-    // VECTOR HAZARDS
-    // ----------------------------
+    // ---------- VECTOR HAZARDS ----------
     let hazardsLayer = null;
     let hazardsGeoJSON = null;
 
@@ -421,7 +401,7 @@
 
     async function loadVectors(){
       setState("Loading hazards…");
-      const res = await fetch("data/GeoHazard.geojson");
+      const res = await fetch("data/GeoHazard.geojson", { cache: "no-store" });
       if (!res.ok) throw new Error("GeoJSON fetch failed: " + res.status);
       hazardsGeoJSON = await res.json();
 
@@ -436,9 +416,7 @@
       setState("Hazards loaded");
     }
 
-    // ----------------------------
-    // RASTER TILES (XYZ)
-    // ----------------------------
+    // ---------- RASTER TILES ----------
     let rasterLayer = null;
 
     function loadRasterTiles(){
@@ -446,21 +424,41 @@
 
       const alpha = Number(document.getElementById("opacityRange").value) / 100;
 
+      // NOTE: XYZ tiles are georeferenced by {z}/{x}/{y} indices.
+      // Leaflet will place them globally; we DO NOT restrict bounds (safer if your grid is correct).
       rasterLayer = L.tileLayer("tiles_velocity/{z}/{x}/{y}.png", {
         opacity: alpha,
-        bounds: RASTER_BOUNDS,
-        maxNativeZoom: 12, // IMPORTANT (your tiles are 8–12)
+        minZoom: 8,
+        maxNativeZoom: 12,   // IMPORTANT: your tiles stop at z=12
         maxZoom: 19,
-        attribution: "InSAR velocity (mm/year)"
+        tms: false,
+        noWrap: false,
+        updateWhenIdle: true,
+        updateWhenZooming: false,
+        keepBuffer: 2
+      });
+
+      rasterLayer.on("tileerror", (e) => {
+        // If you see this, it means Leaflet requested a tile that does not exist (path/zoom issue).
+        console.warn("Tile error:", e);
+        setState("Raster tile missing (check folder/path/zoom)");
       });
 
       rasterLayer.addTo(map);
-      setState("Raster tiles loaded");
+
+      // Debug: show one URL that Leaflet will request near current view
+      const z = Math.min(12, Math.max(8, map.getZoom()));
+      const c = map.getCenter();
+      const p = map.project(c, z).divideBy(256).floor();
+      const debugUrl = `tiles_velocity/${z}/${p.x}/${p.y}.png`;
+      document.getElementById("debugTile").innerHTML =
+        `Test tile: <code>${debugUrl}</code>`;
+
+      setState("Raster tiles ready");
     }
 
-    // ----------------------------
-    // COLORBAR (RdYlGn, fixed -23.3..0..23.3)
-    // ----------------------------
+    // ---------- COLORBAR (fixed correct direction) ----------
+    // Negative (left) should be GREEN; Positive (right) should be RED; 0 center YELLOW.
     const RDYLGN = [
       [165,0,38],[215,48,39],[244,109,67],[253,174,97],[254,224,139],
       [255,255,191],
@@ -478,18 +476,31 @@
       const c1 = palette[Math.min(i+1, n-1)];
       return [ lerp(c0[0], c1[0], f), lerp(c0[1], c1[1], f), lerp(c0[2], c1[2], f) ];
     }
+
     function drawColorbar(){
       const canvas = document.getElementById("colorbar");
       const ctx = canvas.getContext("2d");
       const w = canvas.width, h = canvas.height;
       const img = ctx.createImageData(w, h);
 
+      // We want: left=GREEN, center=YELLOW, right=RED.
+      // In the RDYLGN array we have: RED ... YELLOW ... GREEN.
+      // So for negative side we move from GREEN -> YELLOW.
+      // For positive side we move from YELLOW -> RED.
       for (let x=0; x<w; x++){
         const t = x/(w-1);
-        // Left half: 0..0.5 = yellow->green; Right half: yellow->red
-        const palT = (t <= 0.5)
-          ? (0.5 + 0.5*(t/0.5))            // yellow -> green
-          : (0.5*(1 - (t-0.5)/0.5));       // yellow -> red
+        let palT;
+        if (t <= 0.5){
+          // 0..0.5 : GREEN -> YELLOW
+          // palette t: GREEN is near 1, YELLOW is 0.5
+          const u = t/0.5;              // 0..1
+          palT = 1.0 - 0.5*u;           // 1 -> 0.5
+        } else {
+          // 0.5..1 : YELLOW -> RED
+          // palette t: YELLOW 0.5 -> RED 0
+          const u = (t-0.5)/0.5;        // 0..1
+          palT = 0.5 - 0.5*u;           // 0.5 -> 0
+        }
 
         const rgb = interpPalette(RDYLGN, palT);
         for (let y=0; y<h; y++){
@@ -504,12 +515,10 @@
 
       document.getElementById("tickMin").textContent = `${VMIN.toFixed(1)}`;
       document.getElementById("tickMax").textContent = `${VMAX.toFixed(1)}`;
-      document.getElementById("stretchLabel").textContent = `Stretch: ${VMIN.toFixed(1)} … 0 … ${VMAX.toFixed(1)}`;
+      document.getElementById("rangeLabel").textContent = `${VMIN.toFixed(1)} … 0 … ${VMAX.toFixed(1)}`;
     }
 
-    // ----------------------------
-    // UI
-    // ----------------------------
+    // ---------- UI ----------
     function wireUI(){
       const opacityRange = document.getElementById("opacityRange");
       const opacityLabel = document.getElementById("opacityLabel");
@@ -543,11 +552,20 @@
           map.fitBounds(RASTER_BOUNDS, { padding: [20, 20] });
         }
       });
+
+      // update debug tile when zoom changes
+      map.on("zoomend moveend", () => {
+        if (!rasterLayer) return;
+        const z = Math.min(12, Math.max(8, map.getZoom()));
+        const c = map.getCenter();
+        const p = map.project(c, z).divideBy(256).floor();
+        const debugUrl = `tiles_velocity/${z}/${p.x}/${p.y}.png`;
+        document.getElementById("debugTile").innerHTML =
+          `Test tile: <code>${debugUrl}</code>`;
+      });
     }
 
-    // ----------------------------
-    // INIT
-    // ----------------------------
+    // ---------- INIT ----------
     async function init(){
       wireUI();
       drawColorbar();
@@ -560,16 +578,14 @@
         alert("Could not load data/GeoHazard.geojson. Check the file path in your repo.");
       }
 
-      try{
-        loadRasterTiles();
-        if (hazardsLayer) hazardsLayer.bringToFront();
-        if (RASTER_BOUNDS && RASTER_BOUNDS.isValid()){
-          map.fitBounds(RASTER_BOUNDS, { padding: [20, 20] });
-        }
-      } catch(e){
-        console.error(e);
-        setState("Raster failed");
-        alert("Could not load tiles_velocity/{z}/{x}/{y}.png. Check your tile folder structure.");
+      loadRasterTiles();
+
+      // Put vectors above raster
+      if (hazardsLayer) hazardsLayer.bringToFront();
+
+      // Zoom to raster bbox (where your tiles should be)
+      if (RASTER_BOUNDS && RASTER_BOUNDS.isValid()){
+        map.fitBounds(RASTER_BOUNDS, { padding: [20, 20] });
       }
     }
 
