@@ -444,7 +444,7 @@
           if (v === null || v === undefined) continue;
           if (Number.isNaN(v)) continue;
           if (noData !== null && noData !== undefined && v === noData) continue;
-          sample.push(v*1000); // mm/year
+          sample.push(v*1); // mm/year
         }
       }
       const p2  = percentileFromSample(sample, 2);
@@ -534,7 +534,7 @@
         pixelValuesToColorFn: (vals) => {
           const v = vals?.[0];
           if (v === null || v === undefined) return null;
-          return colorFn(v*1000, alpha); // mm/year
+          return colorFn(v*1, alpha); // mm/year
         }
       });
 
