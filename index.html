@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cochabamba InSAR GeoHazard Map</title>
+
+  <!-- Leaflet -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    :root{
+      --bg:#0b1220;
+      --panel:#0f1b2d;
+      --panel2:#0c1627;
+      --text:#e7eefc;
+      --muted:#9fb0d0;
+      --border:rgba(255,255,255,.10);
+      --shadow:0 18px 50px rgba(0,0,0,.40);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;}
+    body{
+      background: radial-gradient(1100px 700px at 10% 10%, rgba(0, 169, 255, .12), transparent 55%),
+                  radial-gradient(1100px 700px at 90% 20%, rgba(255, 77, 166, .10), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+      overflow:hidden;
+    }
+    #app{height:100%;display:grid;grid-template-columns: 360px 1fr;}
+    #sidebar{
+      height:100%;
+      padding:18px 16px;
+      background: linear-gradient(180deg, rgba(15,27,45,.92), rgba(12,22,39,.92));
+      border-right:1px solid var(--border);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      position:relative;
+      z-index: 1000;
+    }
+    .brand{
+      display:flex; gap:12px; align-items:center; padding:10px 12px;
+      border:1px solid var(--border); border-radius: var(--radius);
+      background: rgba(255,255,255,.04);
+      box-shadow: var(--shadow);
+    }
+    .logo{
+      width:40px;height:40px;border-radius:14px;
+      background: linear-gradient(135deg, rgba(0, 169, 255,.9), rgba(255, 77, 166,.9));
+      box-shadow: 0 10px 24px rgba(0,0,0,.35);
+      flex:0 0 auto;
+    }
+    .brand h1{font-size:16px;margin:0;line-height:1.2}
+    .brand p{margin:2px 0 0;color:var(--muted);font-size:12px}
+
+    .card{
+      margin-top:14px;
+      padding:14px 12px;
+      border:1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,.04);
+      box-shadow: 0 12px 34px rgba(0,0,0,.25);
+    }
+    .card h2{font-size:13px;margin:0 0 10px;color:#d7e6ff;letter-spacing:.2px}
+    .muted{color:var(--muted); font-size:12px; line-height:1.45}
+
+    .legend{
+      display:grid; gap:10px;
+    }
+    .leg-item{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+    .chip{
+      display:inline-flex; align-items:center; gap:8px;
+      padding:7px 10px; border-radius:999px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.18);
+      font-size:12px;
+      white-space:nowrap;
+    }
+    .swatch{
+      width:12px;height:12px;border-radius:4px; border:1px solid rgba(255,255,255,.25);
+    }
+    .stat{
+      text-align:right;
+      font-variant-numeric: tabular-nums;
+      font-size:12px;
+      color:var(--muted);
+      min-width:70px;
+    }
+
+    .controls{
+      display:flex; flex-direction:column; gap:10px;
+    }
+    .row{display:flex; gap:10px; align-items:center; justify-content:space-between;}
+    select, button{
+      width:100%;
+      padding:10px 12px;
+      border-radius: 14px;
+      border:1px solid var(--border);
+      background: rgba(0,0,0,.22);
+      color:var(--text);
+      outline:none;
+      box-shadow: 0 10px 24px rgba(0,0,0,.12);
+    }
+    button{cursor:pointer}
+    button:hover{filter:brightness(1.05)}
+    .tiny{font-size:11px;color:var(--muted);margin-top:10px}
+
+    #map{height:100%; width:100%;}
+    .leaflet-control-layers,
+    .leaflet-control-zoom{
+      border:1px solid rgba(255,255,255,.14) !important;
+      background: rgba(15,27,45,.85) !important;
+      color: var(--text) !important;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 14px !important;
+      box-shadow: 0 14px 36px rgba(0,0,0,.30) !important;
+    }
+    .leaflet-control-layers label{color: var(--text) !important;}
+    .leaflet-control-layers-separator{border-top:1px solid rgba(255,255,255,.14) !important;}
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip{
+      background: rgba(15,27,45,.92) !important;
+      color: var(--text) !important;
+      border:1px solid rgba(255,255,255,.12);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .popup-title{font-weight:700;margin:0 0 6px}
+    .popup-grid{display:grid;grid-template-columns: 1fr 1fr; gap:8px 10px; font-size:12px;}
+    .popup-grid div{padding:6px 8px; border:1px solid rgba(255,255,255,.10); border-radius:12px; background: rgba(0,0,0,.16);}
+    .popup-grid b{display:block;color:#d7e6ff;font-size:11px;margin-bottom:2px}
+
+    /* Responsive */
+    @media (max-width: 920px){
+      #app{grid-template-columns: 1fr; grid-template-rows: auto 1fr;}
+      #sidebar{border-right:none;border-bottom:1px solid var(--border); height:auto;}
+      body{overflow:auto;}
+      #map{height: calc(100vh - 380px);}
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"></div>
+        <div>
+          <h1>Cochabamba InSAR GeoHazard Map</h1>
+          <p>Risk areas classified from InSAR interpretation</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Legend</h2>
+        <div class="legend" id="legend">
+          <!-- Legend filled by JS -->
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Map controls</h2>
+        <div class="controls">
+          <div class="row">
+            <label class="muted" for="filterSelect" style="width:100%;">Filter hazards</label>
+          </div>
+          <select id="filterSelect" aria-label="Filter hazards">
+            <option value="all" selected>Show all classes</option>
+            <option value="2">Class 2 — Landslides</option>
+            <option value="3">Class 3 — Subsidence</option>
+            <option value="4">Class 4 — Uplift</option>
+          </select>
+          <button id="zoomToData">Zoom to hazards</button>
+        </div>
+        <div class="tiny">
+          Tip: click a polygon to see attributes (class, area, id).
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>About</h2>
+        <p class="muted">
+          This is a lightweight WebGIS built with Leaflet and hosted on GitHub Pages.
+          Data source: <code>data/GeoHazard.geojson</code>.
+        </p>
+      </div>
+    </aside>
+
+    <main id="map" aria-label="Map"></main>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
+
+  <script>
+    // ---------- Config ----------
+    const hazardClasses = {
+      2: { name: "Landslides",  color: "#ff6b6b" },
+      3: { name: "Subsidence",  color: "#ffd166" },
+      4: { name: "Uplift",      color: "#4cc9f0" }
+    };
+
+    // ---------- Map ----------
+    const map = L.map("map", { zoomControl: true });
+
+    const basemaps = {
+      "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }),
+      "ESRI World Imagery": L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+        maxZoom: 19,
+        attribution: "Tiles &copy; Esri"
+      }),
+      "Carto Positron": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap &copy; CARTO"
+      })
+    };
+
+    basemaps["Carto Positron"].addTo(map);
+
+    // Keep a reference so we can filter later
+    let hazardsLayer = null;
+    let hazardsGeoJSON = null;
+
+    function styleFeature(feature){
+      const cls = Number(feature?.properties?.class);
+      const conf = hazardClasses[cls] || { color: "#bdb2ff", name: "Unknown" };
+      return {
+        color: conf.color,
+        weight: 1.2,
+        opacity: 0.9,
+        fillColor: conf.color,
+        fillOpacity: 0.40
+      };
+    }
+
+    function popupHTML(props){
+      const cls = Number(props?.class);
+      const clsName = hazardClasses[cls]?.name ?? "Unknown";
+      const areaKm2 = props?.area_km2 ?? null;
+      const areaHa = props?.area_ha ?? null;
+
+      const fmt = (v, digits=3) => (v === null || v === undefined) ? "—" : Number(v).toFixed(digits);
+
+      return `
+        <div>
+          <div class="popup-title">Class ${cls} — ${clsName}</div>
+          <div class="popup-grid">
+            <div><b>gid</b>${props?.gid ?? "—"}</div>
+            <div><b>pid</b>${props?.pid ?? "—"}</div>
+            <div><b>Area (km²)</b>${fmt(areaKm2, 4)}</div>
+            <div><b>Area (ha)</b>${fmt(areaHa, 2)}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function buildLayer(filteredClass = "all"){
+      if (hazardsLayer) {
+        map.removeLayer(hazardsLayer);
+      }
+
+      const feats = (hazardsGeoJSON?.features ?? []).filter(f => {
+        if (filteredClass === "all") return true;
+        return Number(f?.properties?.class) === Number(filteredClass);
+      });
+
+      hazardsLayer = L.geoJSON({ type: "FeatureCollection", features: feats }, {
+        style: styleFeature,
+        onEachFeature: (feature, layer) => {
+          layer.bindPopup(popupHTML(feature.properties), { maxWidth: 320 });
+          layer.on("mouseover", () => layer.setStyle({ weight: 2.4, fillOpacity: 0.55 }));
+          layer.on("mouseout",  () => layer.setStyle({ weight: 1.2, fillOpacity: 0.40 }));
+        }
+      }).addTo(map);
+
+      if (feats.length) {
+        map.fitBounds(hazardsLayer.getBounds(), { padding: [20, 20] });
+      }
+    }
+
+    function buildLegend(counts){
+      const legend = document.getElementById("legend");
+      legend.innerHTML = "";
+      for (const key of [2,3,4]){
+        const c = hazardClasses[key];
+        const item = document.createElement("div");
+        item.className = "leg-item";
+        item.innerHTML = `
+          <span class="chip">
+            <span class="swatch" style="background:${c.color};"></span>
+            <span>Class ${key} — ${c.name}</span>
+          </span>
+          <span class="stat">${counts[key] ?? 0} polys</span>
+        `;
+        legend.appendChild(item);
+      }
+    }
+
+    async function init(){
+      // Load local GeoJSON (works on GitHub Pages)
+      const res = await fetch("data/GeoHazard.geojson");
+      hazardsGeoJSON = await res.json();
+
+      // counts by class (for legend)
+      const counts = {2:0,3:0,4:0};
+      (hazardsGeoJSON.features || []).forEach(f => {
+        const cls = Number(f?.properties?.class);
+        if (counts[cls] !== undefined) counts[cls] += 1;
+      });
+      buildLegend(counts);
+
+      // Build layer and controls
+      buildLayer("all");
+      L.control.layers(basemaps, null, { collapsed: true }).addTo(map);
+
+      // If something goes wrong with bounds (rare), center on Cochabamba-ish
+      if (!hazardsLayer || !hazardsLayer.getBounds().isValid()){
+        map.setView([-17.39, -66.16], 11);
+      }
+
+      // UI hooks
+      document.getElementById("filterSelect").addEventListener("change", (e) => {
+        buildLayer(e.target.value);
+      });
+      document.getElementById("zoomToData").addEventListener("click", () => {
+        if (hazardsLayer && hazardsLayer.getBounds().isValid()){
+          map.fitBounds(hazardsLayer.getBounds(), { padding: [20, 20] });
+        }
+      });
+    }
+
+    init().catch(err => {
+      console.error(err);
+      alert("Could not load data/GeoHazard.geojson. Make sure the file exists in your repo.");
+    });
+  </script>
+</body>
+</html>
