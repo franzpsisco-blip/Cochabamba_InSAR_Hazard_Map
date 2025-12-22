@@ -46,6 +46,7 @@
       -webkit-backdrop-filter: blur(12px);
       position:relative;
       z-index: 1000;
+      overflow:auto;
     }
 
     .topbar{
@@ -103,7 +104,7 @@
       white-space:nowrap;
     }
     .swatch{width:12px;height:12px;border-radius:4px; border:1px solid rgba(255,255,255,.25);}
-    .stat{text-align:right;font-variant-numeric: tabular-nums;font-size:12px;color:var(--muted);min-width:70px;}
+    .stat{text-align:right;font-variant-numeric: tabular-nums;font-size:12px;color:var(--muted);min-width:80px;}
 
     .controls{display:flex; flex-direction:column; gap:10px;}
     .row{display:flex; gap:10px; align-items:center; justify-content:space-between;}
@@ -186,11 +187,24 @@
     }
     .statusline code{color:#d7e6ff}
 
+    .credits{
+      margin-top:12px;
+      padding:12px 12px;
+      border-radius: 14px;
+      border:1px solid rgba(255,255,255,.10);
+      background: rgba(0,0,0,.12);
+      font-size:11px;
+      color:var(--muted);
+      line-height:1.35;
+      text-align:center;
+    }
+    .credits b{color:#d7e6ff}
+
     @media (max-width: 980px){
       #app{grid-template-columns: 1fr; grid-template-rows: auto 1fr;}
       #sidebar{border-right:none;border-bottom:1px solid var(--border); height:auto;}
       body{overflow:auto;}
-      #map{height: calc(100vh - 440px);}
+      #map{height: calc(100vh - 520px);}
     }
   </style>
 </head>
@@ -203,7 +217,7 @@
           <div class="logo" aria-hidden="true"></div>
           <div>
             <h1>Cochabamba InSAR Hazard Map</h1>
-            <p>Vector hazards + velocity raster (mm/year)</p>
+            <p>Vector hazards + velocity raster tiles (mm/year)</p>
           </div>
         </div>
         <div class="pill" title="GitHub Pages ready">
@@ -212,10 +226,10 @@
       </div>
 
       <div class="card">
-        <h2>Velocity raster</h2>
+        <h2>Velocity raster (tiles)</h2>
         <p class="muted" style="margin:0 0 10px;">
-          Values are stretched between the <b>2nd</b> and <b>98th</b> percentiles and multiplied by <b>1000</b> (mm/year).
-          Color ramp is <b>RdYlGn</b> with <b>0</b> centered.
+          Raster is rendered as <b>XYZ PNG tiles</b> (GitHub Pages friendly). NA/NaN pixels are <b>transparent</b>.
+          Stretch is fixed to <b>-23.3 → 0 → 23.3 mm/year</b> (zero-centered).
         </p>
 
         <div class="controls">
@@ -236,13 +250,13 @@
           <div class="barwrap">
             <div class="barhead">
               <b>Velocity (mm/year)</b>
-              <span id="stretchLabel">Loading…</span>
+              <span id="stretchLabel">Stretch: -23.3 … 0 … 23.3</span>
             </div>
             <canvas id="colorbar" width="600" height="40" aria-label="Colorbar"></canvas>
             <div class="ticks">
-              <span id="tickMin">…</span>
+              <span id="tickMin">-23.3</span>
               <span id="tickZero">0</span>
-              <span id="tickMax">…</span>
+              <span id="tickMax">23.3</span>
             </div>
           </div>
         </div>
@@ -269,7 +283,7 @@
       </div>
 
       <div class="statusline" id="status">
-        <span>Data: <code>data/GeoHazard.geojson</code> + <code>data/Cocha_ASCENDING.tif</code></span>
+        <span>Data: <code>data/GeoHazard.geojson</code> + <code>tiles_velocity/{z}/{x}/{y}.png</code></span>
         <span id="loadState">Initializing…</span>
       </div>
 
@@ -280,11 +294,9 @@
         </p>
       </div>
 
-      <div class="card">
-        <h2>Credits</h2>
-        <p class="muted" style="margin:0;">
-          Built with Leaflet + GeoTIFF in-browser rendering. Host on GitHub Pages.
-        </p>
+      <div class="credits">
+        Developed by <b>Franz Antezana</b><br/>
+        mail: <span>antezana@buaa.edu.cn</span>; <span>f.p.antezana@outlook.com</span>
       </div>
     </aside>
 
@@ -295,18 +307,32 @@
           integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
           crossorigin=""></script>
 
-  <script src="https://unpkg.com/geotiff@2.1.3/dist-browser/geotiff.js"></script>
-  <script src="https://unpkg.com/proj4@2.9.2/dist/proj4.js"></script>
-  <script src="https://unpkg.com/georaster@1.6.0/dist/georaster.browser.min.js"></script>
-  <script src="https://unpkg.com/georaster-layer-for-leaflet@3.10.0/dist/georaster-layer-for-leaflet.min.js"></script>
-
   <script>
+    // ----------------------------
+    // CONFIG (from your raster metadata)
+    // ----------------------------
+    const VMIN = -23.3;
+    const VMAX =  23.3;
+
+    // from your terra extent:
+    // xmin -66.5360339909721, xmax -65.5745000815156
+    // ymin -17.8698391625722, ymax -17.2311357408059
+    const RASTER_BOUNDS = L.latLngBounds(
+      L.latLng(-17.8698391625722, -66.5360339909721),
+      L.latLng(-17.2311357408059, -65.5745000815156)
+    );
+
     const hazardClasses = {
       2: { name: "Landslides", color: "#ff6b6b" },
       3: { name: "Subsidence", color: "#ffd166" },
       4: { name: "Uplift",     color: "#4cc9f0" }
     };
 
+    const setState = (msg) => document.getElementById("loadState").textContent = msg;
+
+    // ----------------------------
+    // MAP + BASEMAPS
+    // ----------------------------
     const map = L.map("map", { zoomControl: true });
 
     const basemaps = {
@@ -325,9 +351,12 @@
     basemaps["Carto Positron"].addTo(map);
     L.control.layers(basemaps, null, { collapsed: true }).addTo(map);
 
-    const setState = (msg) => document.getElementById("loadState").textContent = msg;
+    // initial view
+    map.setView([-17.39, -66.16], 11);
 
-    // -------- Vector hazards --------
+    // ----------------------------
+    // VECTOR HAZARDS
+    // ----------------------------
     let hazardsLayer = null;
     let hazardsGeoJSON = null;
 
@@ -390,23 +419,55 @@
       }).addTo(map);
     }
 
-    // -------- Raster --------
-    let rasterLayer = null;
-    let rasterGeoRaster = null;
+    async function loadVectors(){
+      setState("Loading hazards…");
+      const res = await fetch("data/GeoHazard.geojson");
+      if (!res.ok) throw new Error("GeoJSON fetch failed: " + res.status);
+      hazardsGeoJSON = await res.json();
 
+      const counts = {2:0,3:0,4:0};
+      (hazardsGeoJSON.features || []).forEach(f => {
+        const cls = Number(f?.properties?.class);
+        if (counts[cls] !== undefined) counts[cls] += 1;
+      });
+
+      buildLegend(counts);
+      buildHazardsLayer("all");
+      setState("Hazards loaded");
+    }
+
+    // ----------------------------
+    // RASTER TILES (XYZ)
+    // ----------------------------
+    let rasterLayer = null;
+
+    function loadRasterTiles(){
+      setState("Loading raster tiles…");
+
+      const alpha = Number(document.getElementById("opacityRange").value) / 100;
+
+      rasterLayer = L.tileLayer("tiles_velocity/{z}/{x}/{y}.png", {
+        opacity: alpha,
+        bounds: RASTER_BOUNDS,
+        maxNativeZoom: 12, // IMPORTANT (your tiles are 8–12)
+        maxZoom: 19,
+        attribution: "InSAR velocity (mm/year)"
+      });
+
+      rasterLayer.addTo(map);
+      setState("Raster tiles loaded");
+    }
+
+    // ----------------------------
+    // COLORBAR (RdYlGn, fixed -23.3..0..23.3)
+    // ----------------------------
     const RDYLGN = [
       [165,0,38],[215,48,39],[244,109,67],[253,174,97],[254,224,139],
       [255,255,191],
       [217,239,139],[166,217,106],[102,189,99],[26,152,80],[0,104,55]
     ];
-
     function lerp(a,b,t){ return a + (b-a)*t; }
     function clamp(x,a,b){ return Math.max(a, Math.min(b, x)); }
-
-    function rgbToCss(rgb, alpha=1){
-      return `rgba(${rgb[0]|0},${rgb[1]|0},${rgb[2]|0},${alpha})`;
-    }
-
     function interpPalette(palette, t){
       t = clamp(t, 0, 1);
       const n = palette.length;
@@ -417,71 +478,7 @@
       const c1 = palette[Math.min(i+1, n-1)];
       return [ lerp(c0[0], c1[0], f), lerp(c0[1], c1[1], f), lerp(c0[2], c1[2], f) ];
     }
-
-    function percentileFromSample(sample, p){
-      if (!sample.length) return 0;
-      const arr = sample.slice().sort((a,b)=>a-b);
-      const idx = (p/100)*(arr.length-1);
-      const lo = Math.floor(idx), hi = Math.ceil(idx);
-      if (lo === hi) return arr[lo];
-      return arr[lo] + (arr[hi]-arr[lo])*(idx-lo);
-    }
-
-    function computeStretch(georaster, sampleTarget=200000){
-      const values = georaster.values?.[0];
-      const noData = georaster.noDataValue;
-      const sample = [];
-      const height = georaster.height;
-      const width = georaster.width;
-
-      const total = width*height;
-      const stride = Math.max(1, Math.floor(Math.sqrt(total / sampleTarget)));
-
-      for (let y=0; y<height; y+=stride){
-        const row = values[y];
-        for (let x=0; x<width; x+=stride){
-          const v = row[x];
-          if (v === null || v === undefined) continue;
-          if (Number.isNaN(v)) continue;
-          if (noData !== null && noData !== undefined && v === noData) continue;
-          sample.push(v*1); // mm/year
-        }
-      }
-      const p2  = percentileFromSample(sample, 2);
-      const p98 = percentileFromSample(sample, 98);
-      return { p2, p98 };
-    }
-
-    function makeColorScale(p2, p98){
-      return function(v, alpha=0.75){
-        if (v === null || v === undefined || Number.isNaN(v)) return null;
-        const vv = clamp(v, p2, p98);
-
-        // if the data is all positive or all negative
-        if (p2 >= 0 && p98 > 0){
-          const t = (vv - p2) / (p98 - p2 + 1e-12);
-          const rgb = interpPalette(RDYLGN, 0.5*(1 - t)); // yellow->red
-          return rgbToCss(rgb, alpha);
-        }
-        if (p98 <= 0 && p2 < 0){
-          const t = (vv - p2) / (p98 - p2 + 1e-12);
-          const rgb = interpPalette(RDYLGN, 0.5 + 0.5*t); // green->yellow
-          return rgbToCss(rgb, alpha);
-        }
-
-        if (vv >= 0){
-          const t = vv / (p98 + 1e-12);
-          const rgb = interpPalette(RDYLGN, 0.5*(1 - t)); // 0->yellow, max->red
-          return rgbToCss(rgb, alpha);
-        } else {
-          const t = vv / (p2 + 1e-12); // negative/negative => 0..1
-          const rgb = interpPalette(RDYLGN, 0.5 + 0.5*t); // min->green, 0->yellow
-          return rgbToCss(rgb, alpha);
-        }
-      }
-    }
-
-    function drawColorbar(p2, p98){
+    function drawColorbar(){
       const canvas = document.getElementById("colorbar");
       const ctx = canvas.getContext("2d");
       const w = canvas.width, h = canvas.height;
@@ -489,14 +486,10 @@
 
       for (let x=0; x<w; x++){
         const t = x/(w-1);
-        let palT;
-        if (t <= 0.5){
-          const u = t/0.5;
-          palT = 0.5 + 0.5*u; // yellow->green side
-        } else {
-          const u = (t-0.5)/0.5;
-          palT = 0.5*(1-u); // yellow->red side
-        }
+        // Left half: 0..0.5 = yellow->green; Right half: yellow->red
+        const palT = (t <= 0.5)
+          ? (0.5 + 0.5*(t/0.5))            // yellow -> green
+          : (0.5*(1 - (t-0.5)/0.5));       // yellow -> red
 
         const rgb = interpPalette(RDYLGN, palT);
         for (let y=0; y<h; y++){
@@ -509,40 +502,14 @@
       }
       ctx.putImageData(img, 0, 0);
 
-      document.getElementById("tickMin").textContent = `${p2.toFixed(1)}`;
-      document.getElementById("tickMax").textContent = `${p98.toFixed(1)}`;
-      document.getElementById("stretchLabel").textContent = `Stretch: ${p2.toFixed(2)} … 0 … ${p98.toFixed(2)}`;
+      document.getElementById("tickMin").textContent = `${VMIN.toFixed(1)}`;
+      document.getElementById("tickMax").textContent = `${VMAX.toFixed(1)}`;
+      document.getElementById("stretchLabel").textContent = `Stretch: ${VMIN.toFixed(1)} … 0 … ${VMAX.toFixed(1)}`;
     }
 
-    async function loadRaster(){
-      setState("Loading raster…");
-      const response = await fetch("data/Cocha_ASCENDING.tif");
-      const arrayBuffer = await response.arrayBuffer();
-
-      rasterGeoRaster = await parseGeoraster(arrayBuffer);
-
-      const { p2, p98 } = computeStretch(rasterGeoRaster);
-      drawColorbar(p2, p98);
-      const colorFn = makeColorScale(p2, p98);
-
-      const alpha = Number(document.getElementById("opacityRange").value) / 100;
-
-      rasterLayer = new GeoRasterLayer({
-        georaster: rasterGeoRaster,
-        opacity: alpha,
-        resolution: 256,
-        pixelValuesToColorFn: (vals) => {
-          const v = vals?.[0];
-          if (v === null || v === undefined) return null;
-          return colorFn(v*1, alpha); // mm/year
-        }
-      });
-
-      rasterLayer.addTo(map);
-      setState("Raster loaded");
-    }
-
-    // -------- UI --------
+    // ----------------------------
+    // UI
+    // ----------------------------
     function wireUI(){
       const opacityRange = document.getElementById("opacityRange");
       const opacityLabel = document.getElementById("opacityLabel");
@@ -572,31 +539,18 @@
       });
 
       document.getElementById("zoomToRaster").addEventListener("click", () => {
-        if (rasterLayer && rasterLayer.getBounds && rasterLayer.getBounds().isValid()){
-          map.fitBounds(rasterLayer.getBounds(), { padding: [20, 20] });
+        if (RASTER_BOUNDS && RASTER_BOUNDS.isValid()){
+          map.fitBounds(RASTER_BOUNDS, { padding: [20, 20] });
         }
       });
     }
 
-    async function loadVectors(){
-      setState("Loading hazards…");
-      const res = await fetch("data/GeoHazard.geojson");
-      hazardsGeoJSON = await res.json();
-
-      const counts = {2:0,3:0,4:0};
-      (hazardsGeoJSON.features || []).forEach(f => {
-        const cls = Number(f?.properties?.class);
-        if (counts[cls] !== undefined) counts[cls] += 1;
-      });
-
-      buildLegend(counts);
-      buildHazardsLayer("all");
-      setState("Hazards loaded");
-    }
-
+    // ----------------------------
+    // INIT
+    // ----------------------------
     async function init(){
       wireUI();
-      map.setView([-17.39, -66.16], 11);
+      drawColorbar();
 
       try{
         await loadVectors();
@@ -607,15 +561,15 @@
       }
 
       try{
-        await loadRaster();
+        loadRasterTiles();
         if (hazardsLayer) hazardsLayer.bringToFront();
-        if (rasterLayer && rasterLayer.getBounds && rasterLayer.getBounds().isValid()){
-          map.fitBounds(rasterLayer.getBounds(), { padding: [20, 20] });
+        if (RASTER_BOUNDS && RASTER_BOUNDS.isValid()){
+          map.fitBounds(RASTER_BOUNDS, { padding: [20, 20] });
         }
       } catch(e){
         console.error(e);
         setState("Raster failed");
-        alert("Could not load data/Cocha_ASCENDING.tif. If it is huge, consider making it smaller/COG.");
+        alert("Could not load tiles_velocity/{z}/{x}/{y}.png. Check your tile folder structure.");
       }
     }
 
