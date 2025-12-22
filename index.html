@@ -6,7 +6,7 @@
   <title>Cochabamba InSAR Hazard Map</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -301,7 +301,6 @@
     const VMIN = -23.3;
     const VMAX =  23.3;
 
-    // Use raster bbox ONLY for "zoom to raster area"
     const RASTER_BOUNDS = L.latLngBounds(
       L.latLng(-17.8698391625722, -66.5360339909721),
       L.latLng(-17.2311357408059, -65.5745000815156)
@@ -318,40 +317,43 @@
     // ---------- MAP ----------
     const map = L.map("map", { zoomControl: true });
 
-    // IMPORTANT: put ESRI first and ADD it by default
-    const esri = L.tileLayer(
-      "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-      { maxZoom: 19, attribution: "Tiles &copy; Esri" }
-    );
-    const carto = L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-      maxZoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO"
-    });
-    const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
-    });
-
+    // Basemaps
     const basemaps = {
-      "ESRI World Imagery": esri,
-      "Carto Positron": carto,
-      "OpenStreetMap": osm
+      "Carto Positron": L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+        maxZoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO"
+      }),
+      "ESRI World Imagery": L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        { maxZoom: 19, attribution: "Tiles &copy; Esri" }
+      ),
+      "OpenStreetMap": L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+      })
     };
 
-    // Default basemap: ESRI
-    esri.addTo(map);
+    // Default basemap (keep simple; you said ESRI is not necessary)
+    basemaps["Carto Positron"].addTo(map);
 
-    // Raster overlay + hazards overlay MUST be in overlay control (NOT as basemap),
-    // so changing basemap will NOT remove them.
+    // ---------- IMPORTANT FIX: PANES (ensures raster never "hides" behind basemap) ----------
+    map.createPane("rasterPane");
+    map.getPane("rasterPane").style.zIndex = 450; // above basemap tiles (default ~200)
+
+    map.createPane("hazardPane");
+    map.getPane("hazardPane").style.zIndex = 500; // above raster
+
+    // Layers (overlays)
     let rasterLayer = null;
     let hazardsLayer = null;
-    let hazardsGeoJSON = null;
 
-    // Create layers control with overlays placeholder
+    // Control with overlays (CRITICAL: raster must be overlay, not base)
     const overlays = {};
     const layersControl = L.control.layers(basemaps, overlays, { collapsed: true }).addTo(map);
 
     map.setView([-17.39, -66.16], 11);
 
     // ---------- VECTOR HAZARDS ----------
+    let hazardsGeoJSON = null;
+
     function styleFeature(feature){
       const cls = Number(feature?.properties?.class);
       const conf = hazardClasses[cls] || { color: "#bdb2ff", name: "Unknown" };
@@ -396,7 +398,6 @@
     function buildHazardsLayer(filteredClass = "all"){
       if (hazardsLayer) {
         map.removeLayer(hazardsLayer);
-        // keep in control consistent: remove and re-add
         try { layersControl.removeLayer(hazardsLayer); } catch(_) {}
       }
 
@@ -406,19 +407,17 @@
       });
 
       hazardsLayer = L.geoJSON({ type: "FeatureCollection", features: feats }, {
+        pane: "hazardPane",
         style: styleFeature,
         onEachFeature: (feature, layer) => {
           layer.bindPopup(popupHTML(feature.properties), { maxWidth: 340 });
           layer.on("mouseover", () => layer.setStyle({ weight: 2.4, fillOpacity: 0.50 }));
           layer.on("mouseout",  () => layer.setStyle({ weight: 1.2, fillOpacity: 0.35 }));
         }
-      });
+      }).addTo(map);
 
-      hazardsLayer.addTo(map);
-      hazardsLayer.bringToFront();
-
-      // Add as overlay so it won't disappear on basemap change
       layersControl.addOverlay(hazardsLayer, "Hazards (GeoJSON)");
+      hazardsLayer.bringToFront();
     }
 
     async function loadVectors(){
@@ -439,7 +438,7 @@
     }
 
     // ---------- RASTER TILES ----------
-    function ensureRasterOnTop(){
+    function keepOverlaysOnTop(){
       if (rasterLayer && map.hasLayer(rasterLayer)) rasterLayer.bringToFront();
       if (hazardsLayer && map.hasLayer(hazardsLayer)) hazardsLayer.bringToFront();
     }
@@ -450,9 +449,10 @@
       const alpha = Number(document.getElementById("opacityRange").value) / 100;
 
       rasterLayer = L.tileLayer("tiles_velocity/{z}/{x}/{y}.png", {
+        pane: "rasterPane",
         opacity: alpha,
         minZoom: 8,
-        maxNativeZoom: 12,   // tiles stop at z=12
+        maxNativeZoom: 12,
         maxZoom: 19,
         tms: false,
         updateWhenIdle: true,
@@ -466,29 +466,24 @@
       });
 
       rasterLayer.addTo(map);
-
-      // Add as overlay in the layer control (CRITICAL FIX)
       layersControl.addOverlay(rasterLayer, "Velocity raster (tiles)");
 
-      // Keep raster visible when switching basemaps (and keep ordering)
-      map.on("baselayerchange", () => {
-        if (rasterLayer && map.hasLayer(rasterLayer)) rasterLayer.bringToFront();
-        ensureRasterOnTop();
-      });
+      // Ensure overlay order on basemap switch (THIS FIXES THE “DISAPPEAR” FEEL)
+      map.on("baselayerchange", keepOverlaysOnTop);
 
-      // debug: show one URL that Leaflet will request near current view
+      // Debug tile URL at current view
       const z = Math.min(12, Math.max(8, map.getZoom()));
       const c = map.getCenter();
       const p = map.project(c, z).divideBy(256).floor();
-      const debugUrl = `tiles_velocity/${z}/${p.x}/${p.y}.png`;
-      document.getElementById("debugTile").innerHTML = `Test tile: <code>${debugUrl}</code>`;
+      document.getElementById("debugTile").innerHTML =
+        `Test tile: <code>tiles_velocity/${z}/${p.x}/${p.y}.png</code>`;
 
       setState("Raster tiles loaded");
-      ensureRasterOnTop();
+      keepOverlaysOnTop();
     }
 
     // ---------- COLORBAR ----------
-    // Negative (left) = GREEN, 0 center = YELLOW, Positive (right) = RED.
+    // left (negative) GREEN -> center YELLOW -> right (positive) RED
     const RDYLGN = [
       [165,0,38],[215,48,39],[244,109,67],[253,174,97],[254,224,139],
       [255,255,191],
@@ -556,7 +551,7 @@
         if (!rasterLayer) return;
         if (rasterToggle.value === "on") {
           rasterLayer.addTo(map);
-          ensureRasterOnTop();
+          keepOverlaysOnTop();
         } else {
           map.removeLayer(rasterLayer);
         }
@@ -564,7 +559,7 @@
 
       document.getElementById("filterSelect").addEventListener("change", (e) => {
         buildHazardsLayer(e.target.value);
-        ensureRasterOnTop();
+        keepOverlaysOnTop();
       });
 
       document.getElementById("zoomToData").addEventListener("click", () => {
@@ -579,14 +574,13 @@
         }
       });
 
-      // update debug tile when zoom/move changes
       map.on("zoomend moveend", () => {
         if (!rasterLayer) return;
         const z = Math.min(12, Math.max(8, map.getZoom()));
         const c = map.getCenter();
         const p = map.project(c, z).divideBy(256).floor();
-        const debugUrl = `tiles_velocity/${z}/${p.x}/${p.y}.png`;
-        document.getElementById("debugTile").innerHTML = `Test tile: <code>${debugUrl}</code>`;
+        document.getElementById("debugTile").innerHTML =
+          `Test tile: <code>tiles_velocity/${z}/${p.x}/${p.y}.png</code>`;
       });
     }
 
@@ -604,11 +598,8 @@
       }
 
       loadRasterTiles();
+      keepOverlaysOnTop();
 
-      // put vectors above raster
-      ensureRasterOnTop();
-
-      // initial zoom to raster bbox
       if (RASTER_BOUNDS && RASTER_BOUNDS.isValid()){
         map.fitBounds(RASTER_BOUNDS, { padding: [20, 20] });
       }
