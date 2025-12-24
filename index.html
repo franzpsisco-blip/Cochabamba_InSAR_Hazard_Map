@@ -507,19 +507,12 @@
       const ctx = canvas.getContext("2d");
       const w = canvas.width, h = canvas.height;
       const img = ctx.createImageData(w, h);
-
+    
       for (let x=0; x<w; x++){
-        const t = x/(w-1);
-        let palT;
-        if (t <= 0.5){
-          const u = t/0.5;      // 0..1
-          palT = 1.0 - 0.5*u;   // GREEN(1) -> YELLOW(0.5)
-        } else {
-          const u = (t-0.5)/0.5;// 0..1
-          palT = 0.5 - 0.5*u;   // YELLOW(0.5) -> RED(0)
-        }
-
+        const t = x/(w-1);              // 0..1 left->right
+        const palT = t;                 // <-- CHANGE: direct mapping = Red->Yellow->Green
         const rgb = interpPalette(RDYLGN, palT);
+    
         for (let y=0; y<h; y++){
           const i = (y*w + x)*4;
           img.data[i+0] = rgb[0]|0;
@@ -529,7 +522,7 @@
         }
       }
       ctx.putImageData(img, 0, 0);
-
+    
       document.getElementById("tickMin").textContent = `${VMIN.toFixed(1)}`;
       document.getElementById("tickMax").textContent = `${VMAX.toFixed(1)}`;
       document.getElementById("rangeLabel").textContent = `${VMIN.toFixed(1)} … 0 … ${VMAX.toFixed(1)}`;
